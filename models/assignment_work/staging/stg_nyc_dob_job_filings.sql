@@ -1,61 +1,59 @@
--- Clean and standardize NYC DOB Job Applications data
--- One row per job application
+-- Clean and standardize 311 dob job apps data
+-- One row per service request
 
 WITH source AS (
    SELECT * FROM {{ source('raw', 'source_nyc_dob_job_apps') }}
-),
+), -- Easier to refer to the dbt reference to a long name table this way
 
 cleaned AS (
    SELECT
        -- Get all columns from source, except ones we're transforming below
+       -- To do cleaning on them or explicitly cast them as types just in case
        * EXCEPT (
-           job_s_no,
+           job_filing_number,
            job_type,
-           job_status,
-           job_status_descr_cp,
            borough,
            house_no,
            street_name,
-           zis_code, -- or zip_code depending on exact column name
+           zip,
            initial_cost,
            total_construction_floor_area,
            filing_date,
-           issuance_date
+           first_permit_date,
        ),
 
        -- Identifiers
-       CAST(job_s_no AS STRING) AS job_number,
+       CAST(job_filing_number AS STRING) AS job_filing_number,
 
        -- Date/Time
        CAST(filing_date AS TIMESTAMP) AS filing_date,
-       CAST(issuance_date AS TIMESTAMP) AS issuance_date,
+       CAST(first_permit_date AS TIMESTAMP) AS first_permit_date,
 
        -- Job details
        UPPER(TRIM(CAST(job_type AS STRING))) AS job_type,
-       UPPER(TRIM(CAST(job_status AS STRING))) AS job_status,
-       INITCAP(TRIM(CAST(job_status_descr_cp AS STRING))) AS job_status_description,
 
-       -- Location - standardized borough
+
+       -- Location - standardized borough, just in case
        CASE
-           WHEN UPPER(TRIM(borough)) IN ('MANHATTAN', 'NEW YORK COUNTY') THEN 'Manhattan'
-           WHEN UPPER(TRIM(borough)) IN ('BRONX', 'THE BRONX') THEN 'Bronx'
-           WHEN UPPER(TRIM(borough)) IN ('BROOKLYN', 'KINGS COUNTY') THEN 'Brooklyn'
-           WHEN UPPER(TRIM(borough)) IN ('QUEENS', 'QUEEN', 'QUEENS COUNTY') THEN 'Queens'
-           WHEN UPPER(TRIM(borough)) IN ('STATEN ISLAND', 'RICHMOND COUNTY') THEN 'Staten Island'
+           WHEN UPPER(TRIM(borough)) IN ('Manhattan', 'New York County') THEN 'Manhattan'
+           WHEN UPPER(TRIM(borough)) IN ('Bronx', 'The Bronx') THEN 'Bronx'
+           WHEN UPPER(TRIM(borough)) IN ('Brooklyn', 'Kings County') THEN 'Brooklyn'
+           WHEN UPPER(TRIM(borough)) IN ('Queens', 'Queen', 'QUEENS COUNTY') THEN 'Queens'
+           WHEN UPPER(TRIM(borough)) IN ('Staten Island', 'RICHMOND COUNTY') THEN 'Staten Island'
            ELSE 'UNKNOWN or CITYWIDE'
        END AS borough,
 
-       INITCAP(TRIM(CAST(house_no AS STRING))) AS house_number,
-       INITCAP(TRIM(CAST(street_name AS STRING))) AS street_name,
+       INTICAP(TRIM(CAST(house_no AS STRING) AS house_no,
+       INTICAP(TRIM(CAST(street_name AS STRING) AS street_name,
 
-       -- Location - clean zip code (adjust column name if your source uses zip_code vs zis_code)
+       -- Location - clean zip code
        CASE
-           WHEN UPPER(TRIM(CAST(zip_code AS STRING))) IN ('N/A', 'NA', '00000') THEN NULL
-           WHEN LENGTH(CAST(zip_code AS STRING)) = 5 THEN CAST(zip_code AS STRING)
+           WHEN UPPER(TRIM(CAST(zip AS String))) IN ('N/A', 'NA', '00000') THEN NULL 
+           WHEN LENGTH(CAST(zip AS STRING)) = 5 THEN CAST(zip AS STRING)
            ELSE NULL
-       END AS zip_code,
+       END AS zip,
 
-       -- Numerical & Financial fields (handling negative or zero values if needed)
+       -- Numerical & Financial fields
        SAFE_CAST(initial_cost AS NUMERIC) AS initial_cost,
        SAFE_CAST(total_construction_floor_area AS NUMERIC) AS total_construction_floor_area,
 
@@ -64,15 +62,20 @@ cleaned AS (
 
    FROM source
 
-   -- Filters to remove bad records
-   WHERE job_s_no IS NOT NULL
+   -- Filters
+   WHERE job_filing_number IS NOT NULL
    AND filing_date IS NOT NULL
    AND borough IS NOT NULL
-   -- Optional: Filter out data older than a reasonable window if needed
-   AND CAST(filing_date AS DATE) >= DATE('2000-01-01')
+   AND CAST(filing_date AS DATE) >= DATE_SUB('2000-01-01')
 
-   -- Deduplicate based on unique job identifier
-   QUALIFY ROW_NUMBER() OVER (PARTITION BY job_s_no ORDER BY filing_date DESC) = 1
+   -- Deduplicate
+   QUALIFY ROW_NUMBER() OVER (PARTITION BY job_filing_number ORDER BY filing_date DESC) = 1
 )
 
 SELECT * FROM cleaned
+-- All should be part of this table after running: stg_nyc_job_filings
+
+
+
+
+
